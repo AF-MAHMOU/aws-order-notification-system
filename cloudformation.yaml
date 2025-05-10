@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Orders
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  OrderTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: OrderTopic
+
+  OrderQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: OrderQueue
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OrderDLQ.Arn
+        maxReceiveCount: 3
+
+  OrderDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: OrderQueue-DLQ
+
+  OrderSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      TopicArn: !Ref OrderTopic
+      Endpoint: !GetAtt OrderQueue.Arn
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: lambda-permissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  ProcessOrderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ProcessOrder
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          from datetime import datetime
+
+          dynamodb = boto3.resource('dynamodb')
+          table = dynamodb.Table('Orders')
+
+          def lambda_handler(event, context):
+              for record in event['Records']:
+                  try:
+                      sns_payload = json.loads(record['body'])
+                      message = json.loads(sns_payload['Message'])
+
+                      required_fields = ['orderId', 'userId', 'itemName']
+                      if not all(field in message for field in required_fields):
+                          print("ERROR: Missing required fields in message")
+                          continue
+
+                      message.setdefault('quantity', 1)
+                      message.setdefault('status', 'new')
+                      message.setdefault('timestamp', datetime.utcnow().isoformat())
+
+                      table.put_item(Item=message)
+                      print(f"Order {message['orderId']} stored successfully")
+
+                  except Exception as e:
+                      print(f"ERROR processing message: {str(e)}")
+                      raise
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Orders processed successfully')
+              }
+
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref OrdersTable
+
+  LambdaSQSTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt OrderQueue.Arn
+      FunctionName: !Ref ProcessOrderFunction
+      BatchSize: 1
+      Enabled: true
