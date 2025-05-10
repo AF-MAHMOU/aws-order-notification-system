@@ -2,7 +2,9 @@
 **Event-driven order processing using AWS SNS, SQS, Lambda & DynamoDB**
 
 ## 📐 Architecture Overview
-This system implements an event-driven architecture to process e-commerce orders using AWS managed services:
+This system implements an event-driven architecture to process e-commerce orders using AWS managed services.
+
+# Architecture Diagram
 
 ![sequence](https://github.com/user-attachments/assets/72383b5f-bb69-44b5-82ab-74caa971454e)
 
