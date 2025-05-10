@@ -1,77 +1,68 @@
-# aws-order-notification-system
-Event-driven order processing using AWS SNS, SQS, Lambda &amp; DynamoDB
+# AWS Order Notification System
+**Event-driven order processing using AWS SNS, SQS, Lambda & DynamoDB**
 
-📐 Architecture Overview
-This system implements an event-driven architecture to process e-commerce orders using AWS managed services.
+## 📐 Architecture Overview
+This system implements an event-driven architecture to process e-commerce orders using AWS managed services:
 
-![sequence](https://github.com/user-attachments/assets/ff51eb09-a2d2-4196-90e3-d4487d9dc92b)
+![sequence](https://github.com/user-attachments/assets/72383b5f-bb69-44b5-82ab-74caa971454e)
 
-🧩 Components 
-Amazon SNS (OrderTopic):
-Publishes order notifications to subscribed SQS queues.
 
-Amazon SQS (OrderQueue):
-Buffers incoming order events; integrates with DLQ for failed deliveries.
+## 🧩 Components
+| Service | Purpose | Key Features |
+|---------|---------|--------------|
+| **Amazon SNS (OrderTopic)** | Notification hub | Fanout to multiple subscribers |
+| **Amazon SQS (OrderQueue)** | Message buffer | DLQ integration, 30s visibility timeout |
+| **AWS Lambda (ProcessOrder)** | Order processor | Python 3.12, SQS-triggered |
+| **DynamoDB (Orders)** | Data storage | orderId partition key |
+| **Dead Letter Queue** | Error handling | Catches messages after 3 failures |
 
-AWS Lambda (ProcessOrder):
-Consumes messages from SQS and processes orders.
+## ⚙️ Setup Instructions
 
-Amazon DynamoDB (Orders):
-Stores processed order data persistently.
+### Prerequisites
+- AWS account with IAM permissions
+- AWS CLI (optional for testing)
 
-Dead Letter Queue (DLQ):
-Receives failed messages after 3 unsuccessful Lambda attempts.
+### Infrastructure Deployment
+1. **DynamoDB Table**
+   ```bash
+   aws dynamodb create-table \
+     --table-name Orders \
+     --attribute-definitions AttributeName=orderId,AttributeType=S \
+     --key-schema AttributeName=orderId,KeyType=HASH \
+     --billing-mode PAY_PER_REQUEST
+   
+# SNS Topic
+aws sns create-topic --name OrderTopic
+SQS Queue with DLQ
 
-⚙️ Setup Instructions
-1. Prerequisites
-AWS account with appropriate permissions
+# Create DLQ first
+aws sqs create-queue --queue-name OrderQueue-DLQ
 
-AWS CLI configured (optional for testing)
+# Main queue with redrive policy
+aws sqs create-queue --queue-name OrderQueue \
+  --attributes '{
+    "RedrivePolicy": "{
+      \"deadLetterTargetArn\":\"arn:aws:sqs:REGION:ACCOUNT_ID:OrderQueue-DLQ\",
+      \"maxReceiveCount\":\"3\"
+    }"
+  }'
+  
+# 🐍 Lambda Function
+See complete code: lambda_function.py
 
-2. Infrastructure Deployment
-🔸 DynamoDB Table
-Name: Orders
+  Key responsibilities:
 
-Partition Key: orderId (String)
+   -Parse SQS messages
 
-Attributes: userId, itemName, quantity, status, timestamp
+   -Validate required fields (orderId, userId, itemName)
 
-🔸 SNS Topic
-Name: OrderTopic
+   -Write to DynamoDB
 
-Action: Subscribe the SQS queue to this topic
+   -Handle errors with retries
 
-🔸 SQS Queue
-Name: OrderQueue
-
-DLQ Configuration:
-
-MaxReceiveCount: 3
-
-Redrive policy: Enabled
-
-🔸 Lambda Function
-Name: ProcessOrder
-
-Runtime: Python 3.12
-
-Trigger: SQS Queue (OrderQueue)
-
-IAM Role Permissions:
-
-sqs:ReceiveMessage
-
-dynamodb:PutItem
-
-logs:* (CloudWatch)
-
-3. Lambda Function Code
-The complete implementation is in the lambda_function.py file. Ensure the function parses incoming JSON and writes to DynamoDB.
-
-🧪 Testing the System
-Publish a Test Message:
+# 🧪 Testing
 aws sns publish \
-  --topic-arn arn:aws:sns:<REGION>:<ACCOUNT_ID>:OrderTopic \
+  --topic-arn arn:aws:sns:REGION:ACCOUNT_ID:OrderTopic \
   --message '{
     "orderId": "O1234",
     "userId": "U123",
@@ -81,10 +72,12 @@ aws sns publish \
     "timestamp": "2025-05-03T12:00:00Z"
   }'
   
-Verification Steps:
-✅ Check SQS metrics (Messages sent/received)
+# Verification Checklist:
 
-✅ View Lambda logs in CloudWatch
+✅ SQS queue shows message count
 
-✅ Scan the DynamoDB Orders table for entries
+✅ Lambda CloudWatch logs show processing
 
+✅ DynamoDB contains new order
+
+✅ DLQ remains empty (success case)
