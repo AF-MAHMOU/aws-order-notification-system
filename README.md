@@ -6,7 +6,7 @@ This system implements an event-driven architecture to process e-commerce orders
 
 # Architecture Diagram
 
-![sequence](https://github.com/user-attachments/assets/72383b5f-bb69-44b5-82ab-74caa971454e)
+![architecture diagram](https://github.com/user-attachments/assets/6ea19a1a-c98f-4357-b4d5-7edcbc1d808f)
 
 
 ## 🧩 Components
